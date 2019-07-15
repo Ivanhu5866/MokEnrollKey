@@ -28,6 +28,165 @@
 #define MOKKEY_DER_ENROLL_GUID   \
 { 0xe22021f7, 0x3a03, 0x4aea, {0x8b, 0x4c, 0x65, 0x88, 0x1a, 0x2b, 0x88, 0x81}}
 
+#define GNVN_BUF_SIZE 1024
+
+EFI_GUID empty_guid = {0x0,0x0,0x0,{0x0,0x0,0x0,0x0,0x0,0x0,0x0,0x0}};
+EFI_GUID global_variable_guid = EFI_GLOBAL_VARIABLE;
+
+static inline int
+guid_cmp(EFI_GUID *a, EFI_GUID *b)
+{
+	return CompareMem(a, b, sizeof (*a));
+}
+
+static EFI_STATUS
+read_variable(CHAR16 *name, EFI_GUID guid, void **buf_out, UINTN *buf_size_out,
+	      UINT32 *attributes_out)
+{
+	EFI_STATUS rc;
+	UINT32 attributes;
+	UINTN size = 0;
+	void *buf = NULL;
+
+	rc = uefi_call_wrapper(RT->GetVariable, 5, name,
+			       &guid, &attributes, &size, NULL);
+	if (EFI_ERROR(rc)) {
+		if (rc == EFI_BUFFER_TOO_SMALL) {
+			buf = AllocatePool(size);
+			if (!buf) {
+				Print(L"Tried to allocate %d\n", size);
+				Print(L"Could not allocate memory.\n");
+				return EFI_OUT_OF_RESOURCES;
+			}
+		} else if (rc != EFI_NOT_FOUND) {
+			Print(L"Could not get variable \"%s\": %r\n", name, rc);
+			return rc;
+		}
+	} else {
+		Print(L"GetVariable(%s) succeeded with size=0.\n", name);
+		return EFI_INVALID_PARAMETER;
+	}
+	rc = uefi_call_wrapper(RT->GetVariable, 5, name, &guid, &attributes,
+			       &size, buf);
+	if (EFI_ERROR(rc)) {
+		Print(L"Could not get variable \"%s\": %r\n", name, rc);
+		FreePool(buf);
+		return rc;
+	}
+	*buf_out = buf;
+	*buf_size_out = size;
+	*attributes_out = attributes;
+	return EFI_SUCCESS;
+}
+
+static EFI_STATUS
+delete_variable(CHAR16 *name, EFI_GUID guid, UINT32 attributes)
+{
+	return uefi_call_wrapper(RT->SetVariable, 5, name, &guid, attributes,
+				 0, NULL);
+}
+
+static EFI_STATUS
+delete_boot_entry(void)
+{
+	EFI_STATUS rc;
+
+	UINTN variable_name_allocation = GNVN_BUF_SIZE;
+	UINTN variable_name_size = 0;
+	CHAR16 *variable_name;
+	EFI_GUID vendor_guid = empty_guid;
+	EFI_STATUS ret = EFI_OUT_OF_RESOURCES;
+
+	variable_name = AllocateZeroPool(GNVN_BUF_SIZE * 2);
+	if (!variable_name) {
+		Print(L"Tried to allocate %d\n", GNVN_BUF_SIZE * 2);
+		Print(L"Could not allocate memory.\n");
+		return EFI_OUT_OF_RESOURCES;
+	}
+
+	while (1) {
+		variable_name_size = variable_name_allocation;
+		rc = uefi_call_wrapper(RT->GetNextVariableName, 3,
+				       &variable_name_size, variable_name,
+				       &vendor_guid);
+		if (rc == EFI_BUFFER_TOO_SMALL) {
+
+			UINTN new_allocation;
+			CHAR16 *new_name;
+
+			new_allocation = variable_name_size;
+			new_name = AllocatePool(new_allocation * 2);
+			if (!new_name) {
+				Print(L"Tried to allocate %d\n",
+				      new_allocation * 2);
+				Print(L"Could not allocate memory.\n");
+				ret = EFI_OUT_OF_RESOURCES;
+				goto err;
+			}
+			CopyMem(new_name, variable_name,
+				variable_name_allocation);
+			variable_name_allocation = new_allocation;
+			FreePool(variable_name);
+			variable_name = new_name;
+			continue;
+		} else if (rc == EFI_NOT_FOUND) {
+			break;
+		} else if (EFI_ERROR(rc)) {
+			Print(L"Could not get variable name: %r\n", rc);
+			ret = rc;
+			goto err;
+		}
+
+		/* check if the variable name is Boot#### */
+		UINTN vns = StrLen(variable_name);
+		if (!guid_cmp(&vendor_guid, &global_variable_guid)
+		    && vns == 8 && CompareMem(variable_name, L"Boot", 8) == 0) {
+			UINTN info_size = 0;
+			UINT32 attributes = 0;
+			void *info_ptr = NULL;
+			CHAR16 *description = NULL;
+			CHAR16 target[] = L"mok_enroll_key";
+
+			rc = read_variable(variable_name, vendor_guid,
+					   &info_ptr, &info_size, &attributes);
+			if (EFI_ERROR(rc)) {
+				ret = rc;
+				goto err;
+			}
+
+			/*
+			 * check if the boot path created by mok_enroll_key script.
+			 */
+			description = (CHAR16 *) ((UINT8 *)info_ptr
+					 + sizeof(UINT32)
+					 + sizeof(UINT16));
+
+			if (CompareMem(description, target,
+				       sizeof(target) - 2) == 0) {
+
+				rc = delete_variable(variable_name,
+						     vendor_guid, attributes);
+				if (EFI_ERROR(rc)) {
+					Print(L"Failed to delete the mok_enroll_key boot entry.\n");
+					FreePool(info_ptr);
+					ret = rc;
+					goto err;
+				}
+
+				FreePool(info_ptr);
+				break;
+			}
+
+			FreePool(info_ptr);
+		}
+	}
+
+	ret = EFI_SUCCESS;
+err:
+	FreePool(variable_name);
+	return ret;
+}
+
 EFI_STATUS
 EFIAPI
 efi_main (EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable)
@@ -150,6 +309,12 @@ out:
 
 	FreePool(derbuf);
 	derbuf = NULL;
+
+	status = delete_boot_entry();
+	if (status != EFI_SUCCESS)
+		Print(L"Delete boot entry fail.\n");
+	else
+		Print(L"Delete boot entrydone done.\n");
 
 	uefi_call_wrapper(BS->Stall, 1, 10000000);
 
