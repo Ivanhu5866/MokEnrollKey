@@ -33,6 +33,20 @@
 EFI_GUID empty_guid = {0x0,0x0,0x0,{0x0,0x0,0x0,0x0,0x0,0x0,0x0,0x0}};
 EFI_GUID global_variable_guid = EFI_GLOBAL_VARIABLE;
 
+#define EFI_SHELL_PARAMETERS_PROTOCOL_GUID \
+  { \
+  0x752f3136, 0x4e16, 0x4fdc, { 0xa2, 0x2a, 0xe5, 0xf4, 0x68, 0x12, 0xf4, 0xca } \
+  }
+
+typedef VOID *SHELL_FILE_HANDLE;
+typedef struct _EFI_SHELL_PARAMETERS_PROTOCOL {
+  CHAR16 **Argv;
+  UINTN Argc;
+  SHELL_FILE_HANDLE StdIn;
+  SHELL_FILE_HANDLE StdOut;
+  SHELL_FILE_HANDLE StdErr;
+} EFI_SHELL_PARAMETERS_PROTOCOL;
+
 static inline int
 guid_cmp(EFI_GUID *a, EFI_GUID *b)
 {
@@ -188,6 +202,75 @@ err:
 }
 
 EFI_STATUS
+sb_enable (EFI_HANDLE image)
+{
+	EFI_LOADED_IMAGE *loaded_image = NULL;
+	EFI_DEVICE_PATH_PROTOCOL *FilePath;
+	EFI_STATUS status;
+    	EFI_HANDLE image_handle = NULL;
+  	static const EFI_GUID EfiShellParametersProtocolGuid
+		= EFI_SHELL_PARAMETERS_PROTOCOL_GUID;
+	EFI_SHELL_PARAMETERS_PROTOCOL *EfiShellParametersProtocol = NULL;
+
+	status = uefi_call_wrapper(BS->HandleProtocol,
+				3,
+				image, 
+				&LoadedImageProtocol, 
+				(void **) &loaded_image);
+	if (EFI_ERROR(status)) {
+		Print(L"HandleProtocol: %r\n", status);
+		return status;
+	}
+
+	FilePath = FileDevicePath(loaded_image->DeviceHandle, L"efi\\ubuntu\\UbuntuSecBoot.efi");
+	Print(L"file path         : %s\n", DevicePathToStr(FilePath));
+
+	status = uefi_call_wrapper(BS->LoadImage,
+				6,
+				FALSE,
+				image,
+				FilePath,
+				NULL,
+				0,
+				&image_handle);
+	if (EFI_ERROR(status)) {
+		Print(L"Load Image Status = %x\n", status);
+		return status;
+	}
+
+	// Install EFI_SHELL_PARAMETERS_PROTOCOL for the application
+	// which will be loaded
+	EfiShellParametersProtocol = AllocateZeroPool(sizeof(EFI_SHELL_PARAMETERS_PROTOCOL));
+	EfiShellParametersProtocol->Argc = 2;
+	EfiShellParametersProtocol->Argv[0] = L"UbuntuSecBoot.efi";
+	EfiShellParametersProtocol->Argv[1] = L"-enable";
+
+	status = uefi_call_wrapper(BS->InstallProtocolInterface,
+					4,
+					&image_handle,
+					&EfiShellParametersProtocolGuid,
+					EFI_NATIVE_INTERFACE,
+					(void *)EfiShellParametersProtocol);
+
+	status = uefi_call_wrapper(BS->StartImage,
+				3,
+				image_handle,
+				NULL,
+				NULL);
+	if (!EFI_ERROR(status)) {
+		Print(L"StartImage success\n");
+	}
+	else {
+		Print(L"StartImage Status = %x\n", status);
+		FreePool(EfiShellParametersProtocol);
+		return status;
+	}
+
+	FreePool(EfiShellParametersProtocol);
+	return EFI_SUCCESS;
+}
+
+EFI_STATUS
 EFIAPI
 efi_main (EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable)
 {
@@ -283,6 +366,7 @@ efi_main (EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable)
 
 	if (status != EFI_SUCCESS) {
 		Print(L"Enroll Key variable error.\n");
+		goto out;
 	}
 	else {
 		Print(L"Enroll key done.\n");
@@ -290,6 +374,15 @@ efi_main (EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable)
 
 	FreePool(mokbuffer);
 	mokbuffer = NULL;
+
+	/* load and run the UbuntuSecBoot tool for enable secureboot */
+	status = sb_enable(ImageHandle);
+	if (status != EFI_SUCCESS) {
+		Print(L"Enable SB by UbuntuSecBoot.efi error.\n");
+	}
+	else {
+		Print(L"Enable SB done.\n");
+	}
 
 out:
 
