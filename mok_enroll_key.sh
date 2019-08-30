@@ -1,7 +1,9 @@
 #!/bin/bash
 
 BIN=MokEnrollKey.efi
+LOADBIN=UbuntuSecBoot.efi
 TARBIN=/boot/efi/EFI/ubuntu/MokEnrollKey.efi
+TARLOADBIN=/boot/efi/EFI/ubuntu/UbuntuSecBoot.efi
 EFIVAR=/sys/firmware/efi/efivars/MokKeyEnroll-e22021f7-3a03-4aea-8b4c-65881a2b8881
 DER=/var/lib/shim-signed/mok/MOK.der
 
@@ -16,6 +18,13 @@ if [ ! -f $BIN ]; then
 fi
 
 cp -f $BIN $TARBIN || exit $?
+
+if [ ! -f $LOADBIN ]; then
+	echo "Cannot find $LOADBIN"
+	exit 1
+fi
+
+cp -f $LOADBIN $TARLOADBIN || exit $?
 
 #set uefi variable with Mok.der
 if [ -f $EFIVAR ]; then
