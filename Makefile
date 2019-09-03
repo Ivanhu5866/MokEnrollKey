@@ -1,6 +1,6 @@
 ARCH            = $(shell uname -m | sed s,i[3456789]86,ia32,)
 
-TARGET          = MokEnrollKey.efi
+TARGET          = MokEnrollKey.efi loadefi.efi
 
 EFIINC          = /usr/include/efi
 EFIINCS         = -I$(EFIINC) -I$(EFIINC)/$(ARCH) -I$(EFIINC)/protocol
