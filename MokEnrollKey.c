@@ -252,6 +252,11 @@ sb_enable (EFI_HANDLE image)
 					EFI_NATIVE_INTERFACE,
 					(void *)EfiShellParametersProtocol);
 
+	if (EFI_ERROR(status)) {
+		Print(L"Install protocol Status = %x\n", status);
+		return status;
+	}
+
 	status = uefi_call_wrapper(BS->StartImage,
 				3,
 				image_handle,
