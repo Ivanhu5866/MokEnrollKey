@@ -102,5 +102,11 @@ efi_main (EFI_HANDLE image, EFI_SYSTEM_TABLE *systab)
 
 	uefi_call_wrapper(systab->BootServices->Stall, 1, 10000000);
 
+	uefi_call_wrapper(RT->ResetSystem, 4,
+		EfiResetWarm,
+		EFI_SUCCESS,
+		0,
+		NULL);
+
 	return EFI_SUCCESS;
 }
