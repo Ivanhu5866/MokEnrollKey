@@ -275,23 +275,79 @@ sb_enable (EFI_HANDLE image)
 	return EFI_SUCCESS;
 }
 
+static EFI_STATUS
+append_mok(UINTN derbufsize, void *derbuf)
+{
+
+	EFI_STATUS status;
+	EFI_GUID VariableMoksbGuid = MOK_GUID;
+	EFI_SIGNATURE_LIST *CertList;
+	EFI_SIGNATURE_DATA *CertData;
+	UINTN mokbuffersize;
+	void *mokbuffer = NULL;
+	UINT32 VariableAttr;
+
+	EFI_GUID X509_GUID = { 0xa5c059a1, 0x94e4, 0x4aa7, {0x87, 0xb5, 0xab, 0x15, 0x5c, 0x2b, 0xf0, 0x72} };
+
+	mokbuffersize = derbufsize + sizeof(EFI_SIGNATURE_LIST) + sizeof(EFI_GUID);
+	mokbuffer = AllocatePool(mokbuffersize);
+
+	if (!mokbuffer) {
+		Print(L"Cannot AllocatePool.\n");
+		uefi_call_wrapper(BS->Stall, 1, 1000000);
+		status = EFI_OUT_OF_RESOURCES;
+		goto out;
+
+	}
+
+	CertList = mokbuffer;
+	CertList->SignatureType = X509_GUID;
+	CertList->SignatureSize = 16 + derbufsize;
+
+	CopyMem(mokbuffer + sizeof(EFI_SIGNATURE_LIST) + 16, derbuf,
+	       derbufsize);
+
+	CertData = (EFI_SIGNATURE_DATA *) (((UINT8 *) mokbuffer) +
+					   sizeof(EFI_SIGNATURE_LIST));
+
+	CertList->SignatureListSize = mokbuffersize;
+	CertList->SignatureHeaderSize = 0;
+	CertData->SignatureOwner = VariableMoksbGuid;
+
+	VariableAttr = (EFI_VARIABLE_NON_VOLATILE | EFI_VARIABLE_BOOTSERVICE_ACCESS | EFI_VARIABLE_APPEND_WRITE);
+
+	status = uefi_call_wrapper(RT->SetVariable, 5,
+		L"MokList",
+		&VariableMoksbGuid,
+		VariableAttr,
+		mokbuffersize,
+		mokbuffer);
+
+	if (status != EFI_SUCCESS) {
+		Print(L"Enroll Key variable error.\n");
+	}
+	else {
+		Print(L"Enroll key done.\n");
+	}
+
+	FreePool(mokbuffer);
+	mokbuffer = NULL;
+
+out:
+	return status;
+}
+
+
 EFI_STATUS
 EFIAPI
 efi_main (EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable)
 {
 	UINT32 VariableAttr;
-	EFI_GUID VariableMoksbGuid = MOK_GUID;
 	EFI_STATUS status;
 
 	EFI_GUID MokKeyEnrollGuid = MOKKEY_DER_ENROLL_GUID;
 	UINTN derbufsize = 1024;
 	void *derbuf = NULL;
-
-	EFI_SIGNATURE_LIST *CertList;
-	EFI_SIGNATURE_DATA *CertData;
-	UINTN mokbuffersize;
-	void *mokbuffer = NULL;
-	EFI_GUID X509_GUID = { 0xa5c059a1, 0x94e4, 0x4aa7, {0x87, 0xb5, 0xab, 0x15, 0x5c, 0x2b, 0xf0, 0x72} };
 
 	VariableAttr = (EFI_VARIABLE_NON_VOLATILE|EFI_VARIABLE_BOOTSERVICE_ACCESS|EFI_VARIABLE_RUNTIME_ACCESS);
 
@@ -336,49 +392,11 @@ efi_main (EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable)
 		}
 	}
 
-	mokbuffersize = derbufsize + sizeof(EFI_SIGNATURE_LIST) + sizeof(EFI_GUID);
-	mokbuffer = AllocatePool(mokbuffersize);
-
-	if (!mokbuffer) {
-		Print(L"Cannot AllocatePool.\n");
-		uefi_call_wrapper(BS->Stall, 1, 1000000);
-		goto out;
-
-	}
-
-	CertList = mokbuffer;
-	CertList->SignatureType = X509_GUID;
-	CertList->SignatureSize = 16 + derbufsize;
-
-	CopyMem(mokbuffer + sizeof(EFI_SIGNATURE_LIST) + 16, derbuf,
-	       derbufsize);
-
-	CertData = (EFI_SIGNATURE_DATA *) (((UINT8 *) mokbuffer) +
-					   sizeof(EFI_SIGNATURE_LIST));
-
-	CertList->SignatureListSize = mokbuffersize;
-	CertList->SignatureHeaderSize = 0;
-	CertData->SignatureOwner = VariableMoksbGuid;
-
-	VariableAttr = (EFI_VARIABLE_NON_VOLATILE | EFI_VARIABLE_BOOTSERVICE_ACCESS | EFI_VARIABLE_APPEND_WRITE);
-
-	status = uefi_call_wrapper(RT->SetVariable, 5,
-		L"MokList",
-		&VariableMoksbGuid,
-		VariableAttr,   
-		mokbuffersize,
-		mokbuffer);
-
+	status = append_mok(derbufsize, derbuf);
 	if (status != EFI_SUCCESS) {
-		Print(L"Enroll Key variable error.\n");
+		Print(L"Append key to mok error.\n");
 		goto out;
 	}
-	else {
-		Print(L"Enroll key done.\n");
-	}
-
-	FreePool(mokbuffer);
-	mokbuffer = NULL;
 
 	/* load and run the UbuntuSecBoot tool for enable secureboot */
 	status = sb_enable(ImageHandle);
