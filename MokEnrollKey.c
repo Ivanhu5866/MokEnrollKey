@@ -28,6 +28,9 @@
 #define MOKKEY_DER_ENROLL_GUID   \
 { 0xe22021f7, 0x3a03, 0x4aea, {0x8b, 0x4c, 0x65, 0x88, 0x1a, 0x2b, 0x88, 0x81}}
 
+#define MOKKEY_TEST_KERNEL_GUID   \
+{ 0x161a47b3, 0xc116, 0x4942, {0xae, 0x30, 0xcd, 0xe3, 0x1e, 0xca, 0xe2, 0x42}}
+
 #define GNVN_BUF_SIZE 1024
 
 EFI_GUID empty_guid = {0x0,0x0,0x0,{0x0,0x0,0x0,0x0,0x0,0x0,0x0,0x0}};
@@ -346,8 +349,11 @@ efi_main (EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable)
 	EFI_STATUS status;
 
 	EFI_GUID MokKeyEnrollGuid = MOKKEY_DER_ENROLL_GUID;
+	EFI_GUID MokKeyTestKerGuid = MOKKEY_TEST_KERNEL_GUID;
 	UINTN derbufsize = 1024;
 	void *derbuf = NULL;
+	BOOLEAN key_der_found = FALSE;
+	BOOLEAN key_testker_found = FALSE;
 
 	VariableAttr = (EFI_VARIABLE_NON_VOLATILE|EFI_VARIABLE_BOOTSERVICE_ACCESS|EFI_VARIABLE_RUNTIME_ACCESS);
 
@@ -359,6 +365,7 @@ efi_main (EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable)
 		return EFI_SUCCESS;
 	}
 
+	/* Mok Der key enroll */
 	status = uefi_call_wrapper(RT->GetVariable, 5,
 		L"MokKeyEnroll",
 		&MokKeyEnrollGuid,
@@ -367,35 +374,91 @@ efi_main (EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable)
 		derbuf);
 
 	if (status != EFI_SUCCESS) {
-		if (status == EFI_BUFFER_TOO_SMALL) {
+		if (status == EFI_NOT_FOUND) {
+			key_der_found = FALSE;
+		}
+		else if (status == EFI_BUFFER_TOO_SMALL) {
 			FreePool(derbuf);
 			derbuf = AllocatePool(derbufsize);
 			if (!derbuf) {
 				Print(L"Cannot AllocatePool.\n");
+				uefi_call_wrapper(BS->Stall, 1, 10000000);
 				return EFI_SUCCESS;
 			}
 			status = uefi_call_wrapper(RT->GetVariable, 5,
 				L"MokKeyEnroll",
 				&MokKeyEnrollGuid,
-				&VariableAttr,   
+				&VariableAttr,
 				&derbufsize,
 				derbuf);
-
 			if (status != EFI_SUCCESS) {
 				Print(L"Get Der from variable error.\n");
-				goto out;
-			}
+				key_der_found = FALSE;
+			} else
+				key_testker_found = TRUE;
 		}
 		else {
 			Print(L"Get Der from variable error.\n");
+			key_der_found = FALSE;
+		}
+	} else {
+		key_der_found = TRUE;
+	}
+
+	if (key_der_found) {
+		Print(L"Append Mok Der key to mok.\n");
+		status = append_mok(derbufsize, derbuf);
+		if (status != EFI_SUCCESS) {
+			Print(L"Append Mok Der key to mok error.\n");
 			goto out;
 		}
 	}
 
-	status = append_mok(derbufsize, derbuf);
+	/* test kernel key enroll */
+	status = uefi_call_wrapper(RT->GetVariable, 5,
+		L"MokKeyTestKer",
+		&MokKeyTestKerGuid,
+		&VariableAttr,   
+		&derbufsize,
+		derbuf);
+
 	if (status != EFI_SUCCESS) {
-		Print(L"Append key to mok error.\n");
-		goto out;
+		if (status == EFI_NOT_FOUND) {
+			key_testker_found = FALSE;
+		} else if (status == EFI_BUFFER_TOO_SMALL) {
+			FreePool(derbuf);
+			derbuf = AllocatePool(derbufsize);
+			if (!derbuf) {
+				Print(L"Cannot AllocatePool.\n");
+				uefi_call_wrapper(BS->Stall, 1, 10000000);
+				return EFI_SUCCESS;
+			}
+			status = uefi_call_wrapper(RT->GetVariable, 5,
+				L"MokKeyTestKer",
+				&MokKeyEnrollGuid,
+				&VariableAttr,
+				&derbufsize,
+				derbuf);
+			if (status != EFI_SUCCESS) {
+				Print(L"Get Der from variable error.\n");
+				key_testker_found = FALSE;
+			} else
+				key_testker_found = TRUE;
+		} else {
+			Print(L"Get Der from variable error.\n");
+			key_testker_found = FALSE;
+		}
+	} else {
+		key_testker_found = TRUE;
+	}
+
+	if (key_testker_found) {
+		Print(L"Append test kernel key to mok.\n");
+		status = append_mok(derbufsize, derbuf);
+		if (status != EFI_SUCCESS) {
+			Print(L"Append test kernel key to mok error.\n");
+			goto out;
+		}
 	}
 
 	/* load and run the UbuntuSecBoot tool for enable secureboot */
@@ -422,6 +485,19 @@ out:
 		Print(L"Delete MokKeyEnroll variable error.\n");
 	else
 		Print(L"Delete MokKeyEnroll variable done.\n");
+
+	/* delete the var of test kernel */
+	status = uefi_call_wrapper(RT->SetVariable, 5,
+		L"MokKeyTestKer",
+		&MokKeyTestKerGuid,
+		VariableAttr,   
+		0,
+		derbuf);
+
+	if (status != EFI_SUCCESS)
+		Print(L"Delete MokKeyTestKer variable error.\n");
+	else
+		Print(L"Delete MokKeyTestKer variable done.\n");
 
 	FreePool(derbuf);
 	derbuf = NULL;
