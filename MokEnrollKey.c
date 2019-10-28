@@ -31,6 +31,11 @@
 #define MOKKEY_TEST_KERNEL_GUID   \
 { 0x161a47b3, 0xc116, 0x4942, {0xae, 0x30, 0xcd, 0xe3, 0x1e, 0xca, 0xe2, 0x42}}
 
+//21e2d0b5-ea3a-4222-85e6-8106ad766df0
+#define MOKKEY_SB_ENABLE_GUID   \
+{ 0x21e2d0b5, 0xea3a, 0x4222, {0x85, 0xe6, 0x81, 0x06, 0xad, 0x76, 0x6d, 0xf0}}
+
+
 #define GNVN_BUF_SIZE 1024
 
 EFI_GUID empty_guid = {0x0,0x0,0x0,{0x0,0x0,0x0,0x0,0x0,0x0,0x0,0x0}};
@@ -350,10 +355,12 @@ efi_main (EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable)
 
 	EFI_GUID MokKeyEnrollGuid = MOKKEY_DER_ENROLL_GUID;
 	EFI_GUID MokKeyTestKerGuid = MOKKEY_TEST_KERNEL_GUID;
+	EFI_GUID MokKeySBEnableGuid = MOKKEY_SB_ENABLE_GUID;
 	UINTN derbufsize = 1024;
 	void *derbuf = NULL;
 	BOOLEAN key_der_found = FALSE;
 	BOOLEAN key_testker_found = FALSE;
+	BOOLEAN key_sbenable_found = FALSE;
 
 	VariableAttr = (EFI_VARIABLE_NON_VOLATILE|EFI_VARIABLE_BOOTSERVICE_ACCESS|EFI_VARIABLE_RUNTIME_ACCESS);
 
@@ -461,43 +468,104 @@ efi_main (EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable)
 		}
 	}
 
-	/* load and run the UbuntuSecBoot tool for enable secureboot */
-	status = sb_enable(ImageHandle);
+	/* check SB enable variable */
+	status = uefi_call_wrapper(RT->GetVariable, 5,
+		L"MokSBEnable",
+		&MokKeySBEnableGuid,
+		&VariableAttr,   
+		&derbufsize,
+		derbuf);
+
 	if (status != EFI_SUCCESS) {
-		Print(L"Enable SB by UbuntuSecBoot.efi error.\n");
+		if (status == EFI_NOT_FOUND) {
+			key_sbenable_found = FALSE;
+		} else if (status == EFI_BUFFER_TOO_SMALL) {
+			FreePool(derbuf);
+			derbuf = AllocatePool(derbufsize);
+			if (!derbuf) {
+				Print(L"Cannot AllocatePool.\n");
+				uefi_call_wrapper(BS->Stall, 1, 10000000);
+				return EFI_SUCCESS;
+			}
+			status = uefi_call_wrapper(RT->GetVariable, 5,
+				L"MokSBEnable",
+				&MokKeySBEnableGuid,
+				&VariableAttr,
+				&derbufsize,
+				derbuf);
+			if (status != EFI_SUCCESS) {
+				Print(L"Get SB sb state from variable error.\n");
+				key_sbenable_found = FALSE;
+			} else
+				key_sbenable_found = TRUE;
+		} else {
+			Print(L"Get SB state from variable error.\n");
+			key_sbenable_found = FALSE;
+		}
+	} else {
+		key_sbenable_found = TRUE;
 	}
-	else {
-		Print(L"Enable SB done.\n");
+
+	/* load and run the UbuntuSecBoot tool for enable secureboot */
+	if (key_sbenable_found) {
+		Print(L"load and run the UbuntuSecBoot tool for enable secureboot.\n");
+		status = sb_enable(ImageHandle);
+		if (status != EFI_SUCCESS) {
+			Print(L"Enable SB by UbuntuSecBoot.efi error.\n");
+		}
+		else {
+			Print(L"Enable SB done.\n");
+		}
 	}
 
 out:
 
 	VariableAttr = (EFI_VARIABLE_NON_VOLATILE | EFI_VARIABLE_BOOTSERVICE_ACCESS | EFI_VARIABLE_RUNTIME_ACCESS);
 
-	status = uefi_call_wrapper(RT->SetVariable, 5,
-		L"MokKeyEnroll",
-		&MokKeyEnrollGuid,
-		VariableAttr,   
-		0,
-		derbuf);
+	/* delete the mok der variable */
+	if (key_der_found) {
+		status = uefi_call_wrapper(RT->SetVariable, 5,
+			L"MokKeyEnroll",
+			&MokKeyEnrollGuid,
+			VariableAttr,   
+			0,
+			derbuf);
 
-	if (status != EFI_SUCCESS)
-		Print(L"Delete MokKeyEnroll variable error.\n");
-	else
-		Print(L"Delete MokKeyEnroll variable done.\n");
+		if (status != EFI_SUCCESS)
+			Print(L"Delete MokKeyEnroll variable error.\n");
+		else
+			Print(L"Delete MokKeyEnroll variable done.\n");
+	}
 
 	/* delete the var of test kernel */
-	status = uefi_call_wrapper(RT->SetVariable, 5,
-		L"MokKeyTestKer",
-		&MokKeyTestKerGuid,
-		VariableAttr,   
-		0,
-		derbuf);
+	if (key_testker_found) {
+		status = uefi_call_wrapper(RT->SetVariable, 5,
+			L"MokKeyTestKer",
+			&MokKeyTestKerGuid,
+			VariableAttr,   
+			0,
+			derbuf);
 
-	if (status != EFI_SUCCESS)
-		Print(L"Delete MokKeyTestKer variable error.\n");
-	else
-		Print(L"Delete MokKeyTestKer variable done.\n");
+		if (status != EFI_SUCCESS)
+			Print(L"Delete MokKeyTestKer variable error.\n");
+		else
+			Print(L"Delete MokKeyTestKer variable done.\n");
+	}
+
+	/* delete the var of SB enable */
+	if (key_testker_found) {
+		status = uefi_call_wrapper(RT->SetVariable, 5,
+			L"MokSBEnable",
+			&MokKeySBEnableGuid,
+			VariableAttr,   
+			0,
+			derbuf);
+
+		if (status != EFI_SUCCESS)
+			Print(L"Delete MokKeyTestKer variable error.\n");
+		else
+			Print(L"Delete MokKeyTestKer variable done.\n");
+	}
 
 	FreePool(derbuf);
 	derbuf = NULL;
