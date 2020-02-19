@@ -1,5 +1,17 @@
 #!/bin/bash
 
+
+#
+# signed kernel and enroll key to MOK
+#
+#
+# aug1: kernel which would like to be signed
+# aug2: disk (Null defaults to /dev/sda) containing loader for efibootmgr 
+#
+# ex:
+# ./mok_testkernel_key.sh /boot/vmlinuz-4.18.0-25-generic /dev/nvme0n1
+
+
 BIN=MokEnrollKey.efi
 TARBIN=/boot/efi/EFI/ubuntu/MokEnrollKey.efi
 EFIVAR_KER=/sys/firmware/efi/efivars/MokKeyTestKer-161a47b3-c116-4942-ae30-cde31ecae242
@@ -63,9 +75,9 @@ fi
 
 BOOTORDER=`efibootmgr -v | grep 'BootOrder' | cut -d ' ' -f2`
 
-if [ "${1}" != "" ]; then
-	echo "set boot path with device ${1}"
-	efibootmgr -c -d ${1} -L mok_enroll_key -l "\EFI\Ubuntu\MokEnrollKey.efi" > /dev/null 2>&1
+if [ "${2}" != "" ]; then
+	echo "set boot path with device ${2}"
+	efibootmgr -c -d ${2} -L mok_enroll_key -l "\EFI\Ubuntu\MokEnrollKey.efi" > /dev/null 2>&1
 else
 	efibootmgr -c -L mok_enroll_key -l "\EFI\Ubuntu\MokEnrollKey.efi" > /dev/null 2>&1
 fi
