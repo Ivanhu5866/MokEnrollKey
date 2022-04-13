@@ -417,7 +417,6 @@ efi_main (EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable)
 		status = append_mok(derbufsize, derbuf);
 		if (status != EFI_SUCCESS) {
 			Print(L"Append Mok Der key to mok error.\n");
-			goto out;
 		}
 	}
 
@@ -464,7 +463,6 @@ efi_main (EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable)
 		status = append_mok(derbufsize, derbuf);
 		if (status != EFI_SUCCESS) {
 			Print(L"Append test kernel key to mok error.\n");
-			goto out;
 		}
 	}
 
@@ -517,8 +515,6 @@ efi_main (EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable)
 			Print(L"Enable SB done.\n");
 		}
 	}
-
-out:
 
 	VariableAttr = (EFI_VARIABLE_NON_VOLATILE | EFI_VARIABLE_BOOTSERVICE_ACCESS | EFI_VARIABLE_RUNTIME_ACCESS);
 
