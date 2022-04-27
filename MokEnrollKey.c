@@ -553,7 +553,7 @@ out:
 	}
 
 	/* delete the var of SB enable */
-	if (key_testker_found) {
+	if (key_sbenable_found) {
 		status = uefi_call_wrapper(RT->SetVariable, 5,
 			L"MokSBEnable",
 			&MokKeySBEnableGuid,
@@ -562,9 +562,9 @@ out:
 			derbuf);
 
 		if (status != EFI_SUCCESS)
-			Print(L"Delete MokKeyTestKer variable error.\n");
+			Print(L"Delete MokSBEnable variable error.\n");
 		else
-			Print(L"Delete MokKeyTestKer variable done.\n");
+			Print(L"Delete MokSBEnable variable done.\n");
 	}
 
 	FreePool(derbuf);
@@ -574,7 +574,7 @@ out:
 	if (status != EFI_SUCCESS)
 		Print(L"Delete boot entry fail.\n");
 	else
-		Print(L"Delete boot entrydone done.\n");
+		Print(L"Delete boot entry done.\n");
 
 	uefi_call_wrapper(BS->Stall, 1, 10000000);
 
